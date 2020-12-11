@@ -1,2 +1,2 @@
 # pwnSUID
-An exploiter written in Python resources from GTFOBins
+An exploiter written in Python using resources from GTFOBins
